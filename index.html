@@ -224,6 +224,16 @@
   }
   function round2(n){ return Math.round((n+Number.EPSILON)*100)/100; }
 
+  // Convert a JS Date to an Excel serial number (1900 date system).
+  // Deterministic across browser/node — avoids relying on instanceof Date.
+  function excelSerial(d){
+    if (!(d instanceof Date) || isNaN(d)) return null;
+    // Excel epoch: 1899-12-30. Use UTC-noon to dodge DST/timezone drift.
+    const utc = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+    const epoch = Date.UTC(1899, 11, 30);
+    return Math.round((utc - epoch) / 86400000);
+  }
+
   // Parse "m/d/yyyy" -> Date (for column A real dates)
   function parseDate(s){
     s=(s||'').trim(); if(!s) return null;
@@ -295,10 +305,24 @@
     return sM+'.'+sD+'-'+eM+'.'+eD;
   }
   function tabName(programName, suffix){
-    // Google Sheets allows "/" in tab names. Excel truncates at 31 chars; Sheets does too.
-    let name = programName + '_Unbilled Hours_' + suffix;
-    if (name.length > 31) name = name.slice(0,31);
-    return name;
+    // Excel/Sheets cap tab names at 31 chars. The date suffix must ALWAYS survive,
+    // so if we're over budget we shorten the label first, then the program name.
+    const MAX = 31;
+    const full = programName + '_Unbilled Hours_' + suffix;
+    if (full.length <= MAX) return full;
+
+    // Try shorter labels: "_Unbilled Hours_" (16) -> "_Unbilled_" (10) -> "_UH_" (4)
+    const labels = ['_Unbilled Hours_', '_Unbilled_', '_UH_'];
+    for (const lab of labels){
+      const candidate = programName + lab + suffix;
+      if (candidate.length <= MAX) return candidate;
+    }
+
+    // Still too long: truncate the PROGRAM name, keep shortest label + full suffix.
+    const lab = '_UH_';
+    const room = MAX - lab.length - suffix.length;
+    const prog = room > 0 ? programName.slice(0, room) : '';
+    return (prog + lab + suffix).slice(0, MAX);
   }
 
   // ---------- UI ----------
@@ -422,32 +446,33 @@
         aoa.push(r1);
         // Row 2: headers
         aoa.push(OUT_HEADER.slice());
-        // Data rows
+        // Data rows (Date column left null here, written explicitly as a serial below)
         conv.rows.forEach(d=>{
           aoa.push([
-            d.date, d.team, d.name, d.username, d.agency, d.contract, d.type,
+            null, d.team, d.name, d.username, d.agency, d.contract, d.type,
             d.totalHours, d.manualHours, d.totalCharges, d.billCode, d.billRate,
             null, // M filled with formula below
             null  // N (engagement) set below
           ]);
         });
 
-        const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates:true });
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
 
-        // Set engagement + billing formula + date formats per row
+        // Set date, engagement, and billing formula per row
         conv.rows.forEach((d,i)=>{
           const excelRow = 3 + i; // 1-based
+          // Date (A) — explicit Excel serial + date format (reliable in all environments)
+          const serial = excelSerial(d.date);
+          if (serial !== null){
+            ws['A'+excelRow] = { t:'n', v:serial, z:'m/d/yyyy' };
+          } else {
+            ws['A'+excelRow] = { t:'s', v:'' };
+          }
           // Engagement (N)
           const eng = d.agency ? 'Payroll' : 'Independent Contractor';
-          XLSX.utils.sheet_add_aoa(ws, [[eng]], { origin: 'N'+excelRow });
-          // Total Client Billing (M) = H*L formula
-          const cellM = 'M'+excelRow;
-          ws[cellM] = { t:'n', f:'H'+excelRow+'*L'+excelRow };
-          // Date format on A
-          const cellA = 'A'+excelRow;
-          if (ws[cellA] && ws[cellA].v instanceof Date){ ws[cellA].t='d'; ws[cellA].z='m/d/yyyy'; }
-          // Currency format on M
-          ws[cellM].z = '"$"#,##0.00';
+          ws['N'+excelRow] = { t:'s', v:eng };
+          // Total Client Billing (M) = H*L formula, currency-formatted
+          ws['M'+excelRow] = { t:'n', f:'H'+excelRow+'*L'+excelRow, z:'"$"#,##0.00' };
         });
 
         // Row 1 totals
@@ -480,7 +505,7 @@
       if (built===0){ log('No tabs were built. Check the file errors above.', 'err'); return; }
 
       const wbName = 'MS Programs_Accrual Data_'+monthSel.value+' 2026.xlsx';
-      XLSX.writeFile(wb, wbName, { bookType:'xlsx', cellDates:true });
+      XLSX.writeFile(wb, wbName, { bookType:'xlsx' });
       log('Workbook generated: '+wbName+' ('+built+' program tab(s) + Billing Months).', 'ok');
     } catch(err){
       log('Generation failed: '+(err.message||err), 'err');
