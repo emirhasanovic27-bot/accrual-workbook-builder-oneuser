@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MS Programs · Accrual Workbook Builder</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2129;
+    --panel-2: #222b35;
+    --line: #303b47;
+    --ink: #e8edf2;
+    --ink-dim: #93a1b0;
+    --accent: #4db8a8;
+    --accent-deep: #2d8576;
+    --gold: #d9a84e;
+    --danger: #d9694e;
+    --ok: #5bbf7a;
+    --mono: 'SF Mono','JetBrains Mono','Cascadia Code',Consolas,monospace;
+    --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.5; min-height: 100vh; padding: 32px 20px 64px; }
+  .wrap { max-width: 940px; margin: 0 auto; }
+
+  header { margin-bottom: 24px; }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
+  h1 { font-size: 28px; font-weight: 600; letter-spacing: -.02em; line-height: 1.1; }
+  .sub { color: var(--ink-dim); font-size: 14px; margin-top: 8px; max-width: 64ch; }
+
+  .controls {
+    margin-top: 22px; padding: 18px 20px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px;
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-end;
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .field input, .field select {
+    font-family: var(--sans); font-size: 14px; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 12px; min-width: 150px;
+  }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
+  .wbname { flex-basis: 100%; color: var(--ink-dim); font-size: 13px; font-family: var(--mono); padding-top: 4px; }
+  .wbname b { color: var(--gold); }
+
+  .programs { margin-top: 20px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .prow {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--panel);
+    transition: background .15s;
+  }
+  .prow:last-child { border-bottom: none; }
+  .prow.loaded { background: var(--panel-2); }
+  .pname { font-weight: 600; font-size: 14px; min-width: 150px; }
+  .ptag {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 20px; flex-shrink: 0;
+  }
+  .ptag.std { background: rgba(77,184,168,.14); color: var(--accent); }
+  .ptag.gtnp { background: rgba(217,168,78,.16); color: var(--gold); }
+  .pspacer { flex: 1; }
+  .pstatus { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); text-align: right; min-width: 120px; }
+  .pstatus.ok { color: var(--ok); }
+  .pstatus.err { color: var(--danger); }
+
+  .upbtn {
+    font-family: var(--sans); font-size: 12.5px; font-weight: 600;
+    background: var(--panel-2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 14px; cursor: pointer; white-space: nowrap;
+    transition: border-color .15s;
+  }
+  .upbtn:hover { border-color: var(--accent); }
+  .prow.loaded .upbtn { border-color: var(--accent-deep); }
+  .upbtn input { display: none; }
+  .clearbtn {
+    background: none; border: none; color: var(--ink-dim); cursor: pointer;
+    font-size: 18px; line-height: 1; padding: 4px 6px; border-radius: 6px;
+  }
+  .clearbtn:hover { color: var(--danger); background: rgba(217,105,78,.1); }
+
+  .actions { margin-top: 22px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .btn-gen {
+    font-family: var(--sans); font-size: 15px; font-weight: 600;
+    background: var(--accent); color: #07140f; border: none; border-radius: 10px;
+    padding: 13px 26px; cursor: pointer; transition: filter .15s, transform .05s;
+  }
+  .btn-gen:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn-gen:active:not(:disabled) { transform: translateY(1px); }
+  .btn-gen:disabled { opacity: .4; cursor: not-allowed; }
+  .gen-note { color: var(--ink-dim); font-size: 13px; }
+
+  .log { margin-top: 18px; display: none; flex-direction: column; gap: 8px; }
+  .log.show { display: flex; }
+  .logitem {
+    font-family: var(--mono); font-size: 12.5px; padding: 8px 12px;
+    border-radius: 8px; border-left: 2px solid var(--line); background: var(--panel);
+    color: var(--ink-dim);
+  }
+  .logitem.ok { border-left-color: var(--ok); color: var(--ink); }
+  .logitem.warn { border-left-color: var(--gold); color: var(--gold); }
+  .logitem.err { border-left-color: var(--danger); color: var(--danger); }
+
+  footer { margin-top: 30px; color: var(--ink-dim); font-size: 12px; line-height: 1.6; }
+  footer code { font-family: var(--mono); color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">MS Programs · single-user builder</div>
+    <h1>Accrual Workbook Builder</h1>
+    <p class="sub">Upload each program's custom export, pick the month and date range, and generate one Google Sheets–ready workbook with a tab per program. GTNP rates are looked up from the built-in SOW table; all other programs read Bill Code &amp; Bill Rate from their file.</p>
+  </header>
+
+  <div class="controls">
+    <div class="field">
+      <label for="month">Month</label>
+      <select id="month"></select>
+    </div>
+    <div class="field">
+      <label for="startDate">Start date</label>
+      <input type="date" id="startDate">
+    </div>
+    <div class="field">
+      <label for="endDate">End date</label>
+      <input type="date" id="endDate">
+    </div>
+    <div class="wbname" id="wbname"></div>
+  </div>
+
+  <div class="programs" id="programs"></div>
+
+  <div class="actions">
+    <button class="btn-gen" id="genBtn" disabled>Generate workbook</button>
+    <span class="gen-note" id="genNote">Upload at least one program file to enable.</span>
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <footer>
+    Each tab: row 1 totals <code>=SUM(J3:J…)</code> &amp; <code>=SUM(M3:M…)</code>, row 2 headers, data with live <code>=H*L</code> billing. Plus a <code>Billing Months</code> reference sheet. Workbook name: <code>MS Programs_Accrual Data_&lt;Month&gt; 2026</code>.
+  </footer>
+</div>
+
+<script>
+(function () {
+  // ---------- config ----------
+  const PROGRAMS = [
+    { name: 'GMS EMA SC',      mode: 'standard' },
+    { name: 'GTNP SC',         mode: 'gtnp' },
+    { name: 'SHMS SC',         mode: 'standard' },
+    { name: 'Hitachi BR',      mode: 'standard' },
+    { name: 'Hitachi DM',      mode: 'standard' },
+    { name: 'Hitachi DC',      mode: 'standard' },
+    { name: 'SurveyMonkey SC', mode: 'standard' },
+    { name: 'IMS SC',          mode: 'standard' }
+  ];
+
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  // Billing Months reference (2026) — Date Range (Monday-Sunday)
+  const BILLING_MONTHS = [
+    ['January','12/29/25-1/25/26',4],
+    ['February','1/26/26-2/22/26',4],
+    ['March','2/23/26-3/29/26',5],
+    ['April','3/30/26-4/26/26',4],
+    ['May','4/27/26-5/31/26',5],
+    ['June','6/01/26-6/28/26',4],
+    ['July','6/29/26-7/26/26',4],
+    ['August','7/27/26-8/30/26',5],
+    ['September','8/31/26-9/27/26',4],
+    ['October','9/28/26-10/25/26',4],
+    ['November','10/26/26-11/29/26',5],
+    ['December','11/30/26-12/27/26',4]
+  ];
+
+  const OUT_HEADER = [
+    'Date','Team','Freelancer Name','Username','Agency','Contract','Type',
+    'Total Hours','Manual Hours','Total Charges','Bill Code','Bill Rate',
+    'Total Client Billing','Engagement Relationship\n(Independent Contractor or Payroll)'
+  ];
+
+  const MAP = {
+    'Date':['Date'],'Team':['Team'],'Freelancer Name':['Freelancer name'],'Username':['Username'],
+    'Agency':['Agency'],'Contract':['Contract'],'Type':['Type'],'Total Hours':['Total hours'],
+    'Manual Hours':['Manual hours'],'Total Charges':['Total charges'],'Bill Code':['Bill code'],'Bill Rate':['Bill rate']
+  };
+  const MAP_GTNP = {
+    'Date':['Date'],'Team':['Team'],'Freelancer Name':['Freelancer name'],'Username':['Username'],
+    'Agency':['Agency'],'Contract':['Contract'],'Type':['Type'],'Total Hours':['Total hours'],
+    'Manual Hours':['Manual hours'],'Total Charges':['Total charges'],'Bill Code':['G-Code']
+  };
+
+  const SOW_RATES = {"ar-1":9.04,"ar-1-s":11.3,"ar-2":11.67,"ar-2-s":14.58,"ar-3":12.53,"ar-3-s":15.66,"ca-1":13.71,"ca-1-s":17.15,"ca-2":15.28,"ca-2-s":19.1,"ca-3":21.93,"ca-3-s":27.43,"cl-1":38.77,"cl-2":40.82,"cl-3":50.06,"cs-1":12.04,"cs-1-s":15.06,"cs-2":13.69,"cs-2-s":17.12,"cs-3":17.6,"cs-3-s":22.01,"de-1":20.36,"de-1-s":25.44,"de-2":22.16,"de-2-s":27.7,"de-3":26.22,"de-3-s":32.77,"en-1":5.81,"en-1-s":7.26,"en-2":6.16,"en-2-s":7.71,"en-3":8.65,"en-3-s":10.82,"en11-1":20.84,"en11-1-s":26.05,"en11-2":20.84,"en11-2-s":26.05,"en11-3":20.84,"en11-3-s":26.05,"es-419-1":8.04,"es-419-1-s":10.06,"es-419-2":10.32,"es-419-2-s":12.9,"es-419-3":14.21,"es-419-3-s":17.76,"fi-1":20.64,"fi-1-s":25.8,"fi-2":24.01,"fi-2-s":30.02,"fi-3":28.54,"fi-3-s":35.67,"fr-1":10.4,"fr-1-s":13.0,"fr-2":23.76,"fr-2-s":29.7,"fr-3":24.07,"fr-3-s":30.08,"hu-1":10.12,"hu-1-s":12.65,"hu-2":14.63,"hu-2-s":18.28,"hu-3":15.52,"hu-3-s":19.39,"id-1":6.83,"id-1-s":8.54,"id-2":7.85,"id-2-s":9.82,"id-3":9.91,"id-3-s":12.39,"it-1":17.51,"it-1-s":21.89,"it-2":20.17,"it-2-s":25.21,"it-3":24.22,"it-3-s":30.28,"iw-1":20.17,"iw-1-s":25.21,"iw-2":23.48,"iw-2-s":29.35,"iw-3":27.69,"iw-3-s":34.62,"ja-1":21.67,"ja-1-s":27.1,"ja-2":25.28,"ja-2-s":31.61,"ja-3":27.69,"ja-3-s":34.62,"ko-1":18.84,"ko-1-s":23.55,"ko-2":19.78,"ko-2-s":24.74,"ko-3":22.44,"ko-3-s":28.06,"ms-1":7.6,"ms-1-s":9.5,"ms-2":8.66,"ms-2-s":10.83,"ms-3":12.04,"ms-3-s":15.06,"nl-1":18.87,"nl-1-s":23.58,"nl-2":22.21,"nl-2-s":27.76,"nl-3":28.1,"nl-3-s":35.12,"no-1":28.43,"no-1-s":35.54,"no-2":32.03,"no-2-s":40.04,"no-3":34.69,"no-3-s":43.37,"pl-1":12.05,"pl-1-s":15.07,"pl-2":17.75,"pl-2-s":22.19,"pl-3":19.7,"pl-3-s":24.62,"pm-1":82.82,"pt-1":14.69,"pt-1-s":18.36,"pt-2":15.81,"pt-2-s":19.76,"pt-3":16.89,"pt-3-s":21.12,"ru-1":10.02,"ru-1-s":12.52,"ru-2":12.72,"ru-2-s":15.9,"ru-3":14.34,"ru-3-s":17.92,"sv-1":25.61,"sv-1-s":32.01,"sv-2":29.57,"sv-2-s":36.96,"sv-3":30.79,"sv-3-s":38.48,"th-1":9.11,"th-1-s":11.39,"th-2":10.34,"th-2-s":12.93,"th-3":18.63,"th-3-s":23.29,"tr-1":9.3,"tr-1-s":11.63,"tr-2":10.25,"tr-2-s":12.81,"tr-3":12.86,"tr-3-s":16.08,"uk-1":7.94,"uk-1-s":9.92,"uk-2":9.52,"uk-2-s":11.91,"uk-3":13.09,"uk-3-s":16.37,"vi-1":6.78,"vi-1-s":8.47,"vi-2":9.16,"vi-2-s":11.43,"vi-3":9.46,"vi-3-s":11.82,"zh-cn-1":21.14,"zh-cn-1-s":26.43,"zh-cn-2":19.24,"zh-cn-2-s":24.06,"zh-cn-3":19.3,"zh-cn-3-s":24.12,"zh-tw-1":21.14,"zh-tw-1-s":26.42,"zh-tw-2":19.24,"zh-tw-2-s":24.06,"zh-tw-3":19.3,"zh-tw-3-s":24.13,"yl-0":0.0,"su-1":0.0};
+
+  // ---------- CSV parsing ----------
+  function parseCSV(text) {
+    const rows = []; let row=[], field='', i=0, inQ=false;
+    if (text.charCodeAt(0)===0xFEFF) text=text.slice(1);
+    while (i<text.length) {
+      const c=text[i];
+      if (inQ) {
+        if (c==='"') { if (text[i+1]==='"'){field+='"';i+=2;continue;} inQ=false;i++;continue; }
+        field+=c;i++;continue;
+      }
+      if (c==='"'){inQ=true;i++;continue;}
+      if (c===','){row.push(field);field='';i++;continue;}
+      if (c==='\r'){i++;continue;}
+      if (c==='\n'){row.push(field);rows.push(row);row=[];field='';i++;continue;}
+      field+=c;i++;
+    }
+    if (field.length>0||row.length>0){row.push(field);rows.push(row);}
+    return rows;
+  }
+  function findIdx(header,names){
+    for (const n of names){
+      const idx=header.findIndex(h=>h.trim().toLowerCase()===n.trim().toLowerCase());
+      if (idx!==-1) return idx;
+    }
+    return -1;
+  }
+  function round2(n){ return Math.round((n+Number.EPSILON)*100)/100; }
+
+  // Parse "m/d/yyyy" -> Date (for column A real dates)
+  function parseDate(s){
+    s=(s||'').trim(); if(!s) return null;
+    const m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+    if (m){ let y=+m[3]; if(y<100)y+=2000; return new Date(y,+m[1]-1,+m[2]); }
+    const d=new Date(s); return isNaN(d)?null:d;
+  }
+
+  // Convert a raw export into a matrix of [ {cells...} ] rows ready for the sheet.
+  // Returns { rows: [[...14 values, with Date as JS Date and billing as null(formula)]], stats }
+  function convertExport(rawText, mode){
+    const rows = parseCSV(rawText);
+    if (!rows.length) throw new Error('File is empty.');
+    const header = rows[0];
+    const isGTNP = mode==='gtnp';
+    const map = isGTNP ? MAP_GTNP : MAP;
+    const idx={}; const missing=[];
+    for (const o in map){ const i=findIdx(header,map[o]); idx[o]=i; if(i===-1) missing.push(map[o][0]); }
+    if (missing.length){
+      const hint = isGTNP ? ' (GTNP expects a "G-Code" column)' : ' (expects "Bill code" & "Bill rate"; if it has G-Code this should be GTNP)';
+      throw new Error('Missing column(s): '+missing.join(', ')+hint);
+    }
+    const out=[]; let payroll=0, ic=0, unmatched=0; const ucodes={};
+    for (let r=1;r<rows.length;r++){
+      const row=rows[r];
+      if (row.every(c=>(c||'').trim()==='')) continue;
+      const get=i=>(i>=0&&i<row.length?(row[i]??''):'');
+      const dateVal = parseDate(get(idx['Date']));
+      const totalHours = get(idx['Total Hours']).trim();
+      const manualHours = get(idx['Manual Hours']).trim();
+      const totalCharges = get(idx['Total Charges']).trim();
+      const billCode = get(idx['Bill Code']).trim();
+      let billRate;
+      if (isGTNP){
+        const rate = SOW_RATES[billCode.toLowerCase()];
+        if (rate===undefined){ billRate=''; unmatched++; if(billCode) ucodes[billCode]=(ucodes[billCode]||0)+1; }
+        else billRate=rate;
+      } else {
+        billRate = get(idx['Bill Rate']).trim();
+      }
+      const agency = get(idx['Agency']).trim();
+      const eng = agency ? 'Payroll' : 'Independent Contractor';
+      if (agency) payroll++; else ic++;
+      out.push({
+        date: dateVal,
+        team: get(idx['Team']),
+        name: get(idx['Freelancer Name']),
+        username: get(idx['Username']),
+        agency: get(idx['Agency']),
+        contract: get(idx['Contract']),
+        type: get(idx['Type']),
+        totalHours: totalHours===''?'':Number(totalHours),
+        manualHours: manualHours===''?'':Number(manualHours),
+        totalCharges: totalCharges===''?'':Number(totalCharges),
+        billCode: billCode,
+        billRate: billRate===''?'':Number(billRate)
+      });
+    }
+    return { rows: out, stats: { payroll, ic, unmatched, ucodes, total: out.length } };
+  }
+
+  // ---------- tab name / date helpers ----------
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  // start/end are JS Dates. Returns "04.27-30" or "04.27-05.31" (dot, since xlsx tab names can't contain "/")
+  function dateSuffix(start, end){
+    const sM=pad2(start.getMonth()+1), sD=pad2(start.getDate());
+    const eM=pad2(end.getMonth()+1), eD=pad2(end.getDate());
+    if (start.getMonth()===end.getMonth()) return sM+'.'+sD+'-'+eD;
+    return sM+'.'+sD+'-'+eM+'.'+eD;
+  }
+  function tabName(programName, suffix){
+    // Google Sheets allows "/" in tab names. Excel truncates at 31 chars; Sheets does too.
+    let name = programName + '_Unbilled Hours_' + suffix;
+    if (name.length > 31) name = name.slice(0,31);
+    return name;
+  }
+
+  // ---------- UI ----------
+  const monthSel = document.getElementById('month');
+  const startEl = document.getElementById('startDate');
+  const endEl = document.getElementById('endDate');
+  const wbnameEl = document.getElementById('wbname');
+  const programsEl = document.getElementById('programs');
+  const genBtn = document.getElementById('genBtn');
+  const genNote = document.getElementById('genNote');
+  const logEl = document.getElementById('log');
+
+  MONTHS.forEach((m,i)=>{ const o=document.createElement('option'); o.value=m; o.textContent=m; if(i===3)o.selected=true; monthSel.appendChild(o); });
+
+  // file store per program
+  const files = {}; // name -> { text, fileName }
+
+  function updateWbName(){
+    wbnameEl.innerHTML = 'Workbook: <b>MS Programs_Accrual Data_'+monthSel.value+' 2026</b>';
+  }
+  function refreshGenState(){
+    const any = Object.keys(files).length>0;
+    const datesOk = startEl.value && endEl.value;
+    genBtn.disabled = !(any && datesOk);
+    if (!any) genNote.textContent='Upload at least one program file to enable.';
+    else if (!datesOk) genNote.textContent='Set start and end date to enable.';
+    else genNote.textContent=Object.keys(files).length+' program file(s) ready.';
+  }
+
+  PROGRAMS.forEach(p=>{
+    const row=document.createElement('div'); row.className='prow'; row.dataset.name=p.name;
+    row.innerHTML =
+      '<span class="pname">'+p.name+'</span>'+
+      '<span class="ptag '+(p.mode==='gtnp'?'gtnp':'std')+'">'+(p.mode==='gtnp'?'GTNP · SOW':'Standard')+'</span>'+
+      '<span class="pspacer"></span>'+
+      '<span class="pstatus">No file</span>'+
+      '<label class="upbtn">Upload CSV<input type="file" accept=".csv,text/csv"></label>'+
+      '<button class="clearbtn" title="Remove" style="display:none">×</button>';
+    const input=row.querySelector('input');
+    const status=row.querySelector('.pstatus');
+    const clear=row.querySelector('.clearbtn');
+    input.addEventListener('change', e=>{
+      const f=e.target.files[0]; input.value='';
+      if(!f) return;
+      const reader=new FileReader();
+      reader.onload=ev=>{
+        files[p.name]={ text: ev.target.result, fileName: f.name, mode: p.mode };
+        status.textContent=f.name; status.className='pstatus ok';
+        row.classList.add('loaded'); clear.style.display='';
+        refreshGenState();
+      };
+      reader.onerror=()=>{ status.textContent='Read error'; status.className='pstatus err'; };
+      reader.readAsText(f);
+    });
+    clear.addEventListener('click',()=>{
+      delete files[p.name]; status.textContent='No file'; status.className='pstatus';
+      row.classList.remove('loaded'); clear.style.display='none'; refreshGenState();
+    });
+    programsEl.appendChild(row);
+  });
+
+  monthSel.addEventListener('change', ()=>{ updateWbName(); autofillDates(); });
+  startEl.addEventListener('change', refreshGenState);
+  endEl.addEventListener('change', refreshGenState);
+
+  // autofill start/end from Billing Months range for the chosen month
+  function autofillDates(){
+    const bm = BILLING_MONTHS.find(b=>b[0]===monthSel.value);
+    if(!bm) return;
+    const parts = bm[1].split('-'); // "3/30/26-4/26/26"
+    const s = parseDate(parts[0]); const e = parseDate(parts[1]);
+    if(s) startEl.value = isoDate(s);
+    if(e) endEl.value = isoDate(e);
+    refreshGenState();
+  }
+  function isoDate(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+
+  updateWbName(); autofillDates();
+
+  function log(msg, cls){
+    const d=document.createElement('div'); d.className='logitem'+(cls?' '+cls:''); d.textContent=msg;
+    logEl.appendChild(d); logEl.classList.add('show');
+  }
+
+  // ---------- workbook generation ----------
+  genBtn.addEventListener('click', ()=>{
+    logEl.innerHTML=''; logEl.classList.remove('show');
+    const sp = startEl.value.split('-'), ep = endEl.value.split('-');
+    const startD = new Date(+sp[0], +sp[1]-1, +sp[2]);
+    const endD = new Date(+ep[0], +ep[1]-1, +ep[2]);
+    const suffix = dateSuffix(startD, endD);
+
+    try {
+      const wb = XLSX.utils.book_new();
+
+      // Billing Months reference sheet
+      const bmAoa = [['2026 Month/Billing Period','Date Range\n(Monday-Sunday)','Weeks'],
+        ...BILLING_MONTHS.map(r=>[r[0],r[1],r[2]])];
+      const bmWs = XLSX.utils.aoa_to_sheet(bmAoa);
+      bmWs['!cols']=[{wch:24},{wch:22},{wch:8}];
+      XLSX.utils.book_append_sheet(wb, bmWs, 'Billing Months');
+
+      let built=0;
+      const usedNames = { 'Billing Months': true };
+
+      PROGRAMS.forEach(p=>{
+        const fileObj = files[p.name];
+        if (!fileObj) return; // only programs with a file
+
+        let conv;
+        try { conv = convertExport(fileObj.text, p.mode); }
+        catch(err){ log(p.name+': '+err.message, 'err'); return; }
+
+        if (!conv.rows.length){ log(p.name+': no data rows found, skipped.', 'warn'); return; }
+
+        // Build AOA: row1 totals, row2 headers, row3+ data
+        const lastRow = 2 + conv.rows.length; // data starts row 3
+        const aoa = [];
+        // Row 1: summary (J1 col index 9, M1 col index 12)
+        const r1 = new Array(14).fill(null);
+        aoa.push(r1);
+        // Row 2: headers
+        aoa.push(OUT_HEADER.slice());
+        // Data rows
+        conv.rows.forEach(d=>{
+          aoa.push([
+            d.date, d.team, d.name, d.username, d.agency, d.contract, d.type,
+            d.totalHours, d.manualHours, d.totalCharges, d.billCode, d.billRate,
+            null, // M filled with formula below
+            null  // N (engagement) set below
+          ]);
+        });
+
+        const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates:true });
+
+        // Set engagement + billing formula + date formats per row
+        conv.rows.forEach((d,i)=>{
+          const excelRow = 3 + i; // 1-based
+          // Engagement (N)
+          const eng = d.agency ? 'Payroll' : 'Independent Contractor';
+          XLSX.utils.sheet_add_aoa(ws, [[eng]], { origin: 'N'+excelRow });
+          // Total Client Billing (M) = H*L formula
+          const cellM = 'M'+excelRow;
+          ws[cellM] = { t:'n', f:'H'+excelRow+'*L'+excelRow };
+          // Date format on A
+          const cellA = 'A'+excelRow;
+          if (ws[cellA] && ws[cellA].v instanceof Date){ ws[cellA].t='d'; ws[cellA].z='m/d/yyyy'; }
+          // Currency format on M
+          ws[cellM].z = '"$"#,##0.00';
+        });
+
+        // Row 1 totals
+        ws['J1'] = { t:'n', f:'SUM(J3:J'+lastRow+')', z:'"$"#,##0.00' };
+        ws['M1'] = { t:'n', f:'SUM(M3:M'+lastRow+')', z:'"$"#,##0.00' };
+
+        // column widths
+        ws['!cols']=[{wch:11},{wch:24},{wch:20},{wch:14},{wch:22},{wch:28},{wch:8},
+                     {wch:11},{wch:12},{wch:13},{wch:11},{wch:10},{wch:16},{wch:22}];
+
+        // tab name (unique within workbook)
+        let tn = tabName(p.name, suffix);
+        let base = tn, k=2;
+        while (usedNames[tn]){ tn = (base.slice(0, 31-(' '+k).length))+' '+k; k++; }
+        usedNames[tn]=true;
+
+        XLSX.utils.book_append_sheet(wb, ws, tn);
+
+        let msg = p.name+': '+conv.stats.total+' rows → "'+tn+'" ('+conv.stats.payroll+' Payroll, '+conv.stats.ic+' IC)';
+        if (p.mode==='gtnp' && conv.stats.unmatched>0){
+          const codes = Object.keys(conv.stats.ucodes).join(', ');
+          msg += ' · '+conv.stats.unmatched+' unmatched G-Code rows ('+codes+') — rate left blank';
+          log(msg, 'warn');
+        } else {
+          log(msg, 'ok');
+        }
+        built++;
+      });
+
+      if (built===0){ log('No tabs were built. Check the file errors above.', 'err'); return; }
+
+      const wbName = 'MS Programs_Accrual Data_'+monthSel.value+' 2026.xlsx';
+      XLSX.writeFile(wb, wbName, { bookType:'xlsx', cellDates:true });
+      log('Workbook generated: '+wbName+' ('+built+' program tab(s) + Billing Months).', 'ok');
+    } catch(err){
+      log('Generation failed: '+(err.message||err), 'err');
+    }
+  });
+
+})();
+</script>
+</body>
+</html>
