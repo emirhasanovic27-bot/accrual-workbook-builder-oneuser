@@ -55,12 +55,6 @@
   .prow:last-child { border-bottom: none; }
   .prow.loaded { background: var(--panel-2); }
   .pname { font-weight: 600; font-size: 14px; min-width: 150px; }
-  .ptag {
-    font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
-    padding: 2px 8px; border-radius: 20px; flex-shrink: 0;
-  }
-  .ptag.std { background: rgba(77,184,168,.14); color: var(--accent); }
-  .ptag.gtnp { background: rgba(217,168,78,.16); color: var(--gold); }
   .pspacer { flex: 1; }
   .pstatus { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); text-align: right; min-width: 120px; }
   .pstatus.ok { color: var(--ok); }
@@ -112,7 +106,7 @@
   <header>
     <div class="eyebrow">MS Programs · single-user builder</div>
     <h1>Accrual Workbook Builder</h1>
-    <p class="sub">Upload each program's custom export, pick the month and date range, and generate one Google Sheets–ready workbook with a tab per program. GTNP rates are looked up from the built-in SOW table; all other programs read Bill Code &amp; Bill Rate from their file.</p>
+    <p class="sub">Upload each program's custom export, pick the month and date range, and generate one Google Sheets–ready workbook with a tab per program. Every program reads Bill Code &amp; Bill Rate from its file; Total Client Billing is a live Hours × Rate formula.</p>
   </header>
 
   <div class="controls">
@@ -149,14 +143,14 @@
 (function () {
   // ---------- config ----------
   const PROGRAMS = [
-    { name: 'GMS EMA SC',      mode: 'standard' },
-    { name: 'GTNP SC',         mode: 'gtnp' },
-    { name: 'SHMS SC',         mode: 'standard' },
-    { name: 'Hitachi BR',      mode: 'standard' },
-    { name: 'Hitachi DM',      mode: 'standard' },
-    { name: 'Hitachi DC',      mode: 'standard' },
-    { name: 'SurveyMonkey SC', mode: 'standard' },
-    { name: 'IMS SC',          mode: 'standard' }
+    'GMS EMA SC',
+    'GTNP SC',
+    'SHMS SC',
+    'Hitachi BR',
+    'Hitachi DM',
+    'Hitachi DC',
+    'SurveyMonkey SC',
+    'IMS SC'
   ];
 
   const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -188,13 +182,6 @@
     'Agency':['Agency'],'Contract':['Contract'],'Type':['Type'],'Total Hours':['Total hours'],
     'Manual Hours':['Manual hours'],'Total Charges':['Total charges'],'Bill Code':['Bill code'],'Bill Rate':['Bill rate']
   };
-  const MAP_GTNP = {
-    'Date':['Date'],'Team':['Team'],'Freelancer Name':['Freelancer name'],'Username':['Username'],
-    'Agency':['Agency'],'Contract':['Contract'],'Type':['Type'],'Total Hours':['Total hours'],
-    'Manual Hours':['Manual hours'],'Total Charges':['Total charges'],'Bill Code':['G-Code']
-  };
-
-  const SOW_RATES = {"ar-1":9.04,"ar-1-s":11.3,"ar-2":11.67,"ar-2-s":14.58,"ar-3":12.53,"ar-3-s":15.66,"ca-1":13.71,"ca-1-s":17.15,"ca-2":15.28,"ca-2-s":19.1,"ca-3":21.93,"ca-3-s":27.43,"cl-1":38.77,"cl-2":40.82,"cl-3":50.06,"cs-1":12.04,"cs-1-s":15.06,"cs-2":13.69,"cs-2-s":17.12,"cs-3":17.6,"cs-3-s":22.01,"de-1":20.36,"de-1-s":25.44,"de-2":22.16,"de-2-s":27.7,"de-3":26.22,"de-3-s":32.77,"en-1":5.81,"en-1-s":7.26,"en-2":6.16,"en-2-s":7.71,"en-3":8.65,"en-3-s":10.82,"en11-1":20.84,"en11-1-s":26.05,"en11-2":20.84,"en11-2-s":26.05,"en11-3":20.84,"en11-3-s":26.05,"es-419-1":8.04,"es-419-1-s":10.06,"es-419-2":10.32,"es-419-2-s":12.9,"es-419-3":14.21,"es-419-3-s":17.76,"fi-1":20.64,"fi-1-s":25.8,"fi-2":24.01,"fi-2-s":30.02,"fi-3":28.54,"fi-3-s":35.67,"fr-1":10.4,"fr-1-s":13.0,"fr-2":23.76,"fr-2-s":29.7,"fr-3":24.07,"fr-3-s":30.08,"hu-1":10.12,"hu-1-s":12.65,"hu-2":14.63,"hu-2-s":18.28,"hu-3":15.52,"hu-3-s":19.39,"id-1":6.83,"id-1-s":8.54,"id-2":7.85,"id-2-s":9.82,"id-3":9.91,"id-3-s":12.39,"it-1":17.51,"it-1-s":21.89,"it-2":20.17,"it-2-s":25.21,"it-3":24.22,"it-3-s":30.28,"iw-1":20.17,"iw-1-s":25.21,"iw-2":23.48,"iw-2-s":29.35,"iw-3":27.69,"iw-3-s":34.62,"ja-1":21.67,"ja-1-s":27.1,"ja-2":25.28,"ja-2-s":31.61,"ja-3":27.69,"ja-3-s":34.62,"ko-1":18.84,"ko-1-s":23.55,"ko-2":19.78,"ko-2-s":24.74,"ko-3":22.44,"ko-3-s":28.06,"ms-1":7.6,"ms-1-s":9.5,"ms-2":8.66,"ms-2-s":10.83,"ms-3":12.04,"ms-3-s":15.06,"nl-1":18.87,"nl-1-s":23.58,"nl-2":22.21,"nl-2-s":27.76,"nl-3":28.1,"nl-3-s":35.12,"no-1":28.43,"no-1-s":35.54,"no-2":32.03,"no-2-s":40.04,"no-3":34.69,"no-3-s":43.37,"pl-1":12.05,"pl-1-s":15.07,"pl-2":17.75,"pl-2-s":22.19,"pl-3":19.7,"pl-3-s":24.62,"pm-1":82.82,"pt-1":14.69,"pt-1-s":18.36,"pt-2":15.81,"pt-2-s":19.76,"pt-3":16.89,"pt-3-s":21.12,"ru-1":10.02,"ru-1-s":12.52,"ru-2":12.72,"ru-2-s":15.9,"ru-3":14.34,"ru-3-s":17.92,"sv-1":25.61,"sv-1-s":32.01,"sv-2":29.57,"sv-2-s":36.96,"sv-3":30.79,"sv-3-s":38.48,"th-1":9.11,"th-1-s":11.39,"th-2":10.34,"th-2-s":12.93,"th-3":18.63,"th-3-s":23.29,"tr-1":9.3,"tr-1-s":11.63,"tr-2":10.25,"tr-2-s":12.81,"tr-3":12.86,"tr-3-s":16.08,"uk-1":7.94,"uk-1-s":9.92,"uk-2":9.52,"uk-2-s":11.91,"uk-3":13.09,"uk-3-s":16.37,"vi-1":6.78,"vi-1-s":8.47,"vi-2":9.16,"vi-2-s":11.43,"vi-3":9.46,"vi-3-s":11.82,"zh-cn-1":21.14,"zh-cn-1-s":26.43,"zh-cn-2":19.24,"zh-cn-2-s":24.06,"zh-cn-3":19.3,"zh-cn-3-s":24.12,"zh-tw-1":21.14,"zh-tw-1-s":26.42,"zh-tw-2":19.24,"zh-tw-2-s":24.06,"zh-tw-3":19.3,"zh-tw-3-s":24.13,"yl-0":0.0,"su-1":0.0};
 
   // ---------- CSV parsing ----------
   function parseCSV(text) {
@@ -243,20 +230,17 @@
   }
 
   // Convert a raw export into a matrix of [ {cells...} ] rows ready for the sheet.
-  // Returns { rows: [[...14 values, with Date as JS Date and billing as null(formula)]], stats }
-  function convertExport(rawText, mode){
+  // Returns { rows: [...], stats }
+  function convertExport(rawText){
     const rows = parseCSV(rawText);
     if (!rows.length) throw new Error('File is empty.');
     const header = rows[0];
-    const isGTNP = mode==='gtnp';
-    const map = isGTNP ? MAP_GTNP : MAP;
     const idx={}; const missing=[];
-    for (const o in map){ const i=findIdx(header,map[o]); idx[o]=i; if(i===-1) missing.push(map[o][0]); }
+    for (const o in MAP){ const i=findIdx(header,MAP[o]); idx[o]=i; if(i===-1) missing.push(MAP[o][0]); }
     if (missing.length){
-      const hint = isGTNP ? ' (GTNP expects a "G-Code" column)' : ' (expects "Bill code" & "Bill rate"; if it has G-Code this should be GTNP)';
-      throw new Error('Missing column(s): '+missing.join(', ')+hint);
+      throw new Error('Missing column(s): '+missing.join(', '));
     }
-    const out=[]; let payroll=0, ic=0, unmatched=0; const ucodes={};
+    const out=[]; let payroll=0, ic=0;
     for (let r=1;r<rows.length;r++){
       const row=rows[r];
       if (row.every(c=>(c||'').trim()==='')) continue;
@@ -266,14 +250,7 @@
       const manualHours = get(idx['Manual Hours']).trim();
       const totalCharges = get(idx['Total Charges']).trim();
       const billCode = get(idx['Bill Code']).trim();
-      let billRate;
-      if (isGTNP){
-        const rate = SOW_RATES[billCode.toLowerCase()];
-        if (rate===undefined){ billRate=''; unmatched++; if(billCode) ucodes[billCode]=(ucodes[billCode]||0)+1; }
-        else billRate=rate;
-      } else {
-        billRate = get(idx['Bill Rate']).trim();
-      }
+      const billRate = get(idx['Bill Rate']).trim();
       const agency = get(idx['Agency']).trim();
       const eng = agency ? 'Payroll' : 'Independent Contractor';
       if (agency) payroll++; else ic++;
@@ -292,7 +269,7 @@
         billRate: billRate===''?'':Number(billRate)
       });
     }
-    return { rows: out, stats: { payroll, ic, unmatched, ucodes, total: out.length } };
+    return { rows: out, stats: { payroll, ic, total: out.length } };
   }
 
   // ---------- tab name / date helpers ----------
@@ -352,11 +329,10 @@
     else genNote.textContent=Object.keys(files).length+' program file(s) ready.';
   }
 
-  PROGRAMS.forEach(p=>{
-    const row=document.createElement('div'); row.className='prow'; row.dataset.name=p.name;
+  PROGRAMS.forEach(name=>{
+    const row=document.createElement('div'); row.className='prow'; row.dataset.name=name;
     row.innerHTML =
-      '<span class="pname">'+p.name+'</span>'+
-      '<span class="ptag '+(p.mode==='gtnp'?'gtnp':'std')+'">'+(p.mode==='gtnp'?'GTNP · SOW':'Standard')+'</span>'+
+      '<span class="pname">'+name+'</span>'+
       '<span class="pspacer"></span>'+
       '<span class="pstatus">No file</span>'+
       '<label class="upbtn">Upload CSV<input type="file" accept=".csv,text/csv"></label>'+
@@ -369,7 +345,7 @@
       if(!f) return;
       const reader=new FileReader();
       reader.onload=ev=>{
-        files[p.name]={ text: ev.target.result, fileName: f.name, mode: p.mode };
+        files[name]={ text: ev.target.result, fileName: f.name };
         status.textContent=f.name; status.className='pstatus ok';
         row.classList.add('loaded'); clear.style.display='';
         refreshGenState();
@@ -378,7 +354,7 @@
       reader.readAsText(f);
     });
     clear.addEventListener('click',()=>{
-      delete files[p.name]; status.textContent='No file'; status.className='pstatus';
+      delete files[name]; status.textContent='No file'; status.className='pstatus';
       row.classList.remove('loaded'); clear.style.display='none'; refreshGenState();
     });
     programsEl.appendChild(row);
@@ -428,15 +404,15 @@
       let built=0;
       const usedNames = { 'Billing Months': true };
 
-      PROGRAMS.forEach(p=>{
-        const fileObj = files[p.name];
+      PROGRAMS.forEach(name=>{
+        const fileObj = files[name];
         if (!fileObj) return; // only programs with a file
 
         let conv;
-        try { conv = convertExport(fileObj.text, p.mode); }
-        catch(err){ log(p.name+': '+err.message, 'err'); return; }
+        try { conv = convertExport(fileObj.text); }
+        catch(err){ log(name+': '+err.message, 'err'); return; }
 
-        if (!conv.rows.length){ log(p.name+': no data rows found, skipped.', 'warn'); return; }
+        if (!conv.rows.length){ log(name+': no data rows found, skipped.', 'warn'); return; }
 
         // Build AOA: row1 totals, row2 headers, row3+ data
         const lastRow = 2 + conv.rows.length; // data starts row 3
@@ -484,21 +460,14 @@
                      {wch:11},{wch:12},{wch:13},{wch:11},{wch:10},{wch:16},{wch:22}];
 
         // tab name (unique within workbook)
-        let tn = tabName(p.name, suffix);
+        let tn = tabName(name, suffix);
         let base = tn, k=2;
         while (usedNames[tn]){ tn = (base.slice(0, 31-(' '+k).length))+' '+k; k++; }
         usedNames[tn]=true;
 
         XLSX.utils.book_append_sheet(wb, ws, tn);
 
-        let msg = p.name+': '+conv.stats.total+' rows → "'+tn+'" ('+conv.stats.payroll+' Payroll, '+conv.stats.ic+' IC)';
-        if (p.mode==='gtnp' && conv.stats.unmatched>0){
-          const codes = Object.keys(conv.stats.ucodes).join(', ');
-          msg += ' · '+conv.stats.unmatched+' unmatched G-Code rows ('+codes+') — rate left blank';
-          log(msg, 'warn');
-        } else {
-          log(msg, 'ok');
-        }
+        log(name+': '+conv.stats.total+' rows → "'+tn+'" ('+conv.stats.payroll+' Payroll, '+conv.stats.ic+' IC)', 'ok');
         built++;
       });
 
