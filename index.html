@@ -54,6 +54,12 @@
   .prow:last-child { border-bottom: none; }
   .prow.loaded { background: var(--panel-2); }
   .pname { font-weight: 600; font-size: 14px; min-width: 150px; }
+  .ptag {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 20px; flex-shrink: 0; margin-left: 10px;
+    background: rgba(217,168,78,.16); color: var(--gold);
+  }
+  .ptag.ok { background: rgba(91,191,122,.16); color: var(--ok); }
   .pspacer { flex: 1; }
   .pstatus { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); text-align: right; min-width: 120px; }
   .pstatus.ok { color: var(--ok); }
@@ -66,7 +72,9 @@
     transition: border-color .15s;
   }
   .upbtn:hover { border-color: var(--accent); }
-  .prow.loaded .upbtn { border-color: var(--accent-deep); }
+  .prow.loaded .upbtn.exinput, .prow.loaded > .upbtn { border-color: var(--accent-deep); }
+  .dbbtn { border-color: var(--gold); color: var(--gold); }
+  .dbbtn.loaded-db { border-color: var(--ok); color: var(--ok); }
   .upbtn input { display: none; }
   .clearbtn {
     background: none; border: none; color: var(--ink-dim); cursor: pointer;
@@ -105,7 +113,7 @@
   <header>
     <div class="eyebrow">MS Programs · single-user builder</div>
     <h1>Accrual Workbook Builder</h1>
-    <p class="sub">Upload each program's custom export, pick the month and date range, and generate one Google Sheets–ready workbook with a tab per program. Every program reads Bill Code &amp; Bill Rate from its file; Total Client Billing is a live Hours × Rate formula.</p>
+    <p class="sub">Upload each program's custom export, pick the month and date range, and generate one Google Sheets–ready workbook with a tab per program. Most programs read Bill Code &amp; Bill Rate from their file. HTE MS COS also needs its rate database uploaded (a separate CSV); the app fills Bill Rate from it by username, then name, and leaves Bill Code empty. Nothing is stored — files stay in your browser.</p>
   </header>
 
   <div class="controls">
@@ -140,16 +148,24 @@
 <script>
 (function () {
   // ---------- config ----------
+  // Programs. A plain string is a standard program (reads Bill code & Bill rate from file).
+  // HTE MS COS is special: Bill Rate is looked up from the internal Hitachi database by
+  // username (then name), and Bill Code is left empty.
   const PROGRAMS = [
     'GMS EMA SC',
     'GTNP SC',
     'SHMS SC',
-    'Hitachi BR',
-    'Hitachi DM',
-    'Hitachi DC',
+    { name: 'HTE MS COS', mode: 'hitachi' },
     'SurveyMonkey SC',
     'IMS SC'
   ];
+
+  // The HTE MS COS rate database is NOT embedded in this file. It is uploaded at runtime
+  // (a separate CSV with columns: Freelancer Name, Freelancer User ID, ... , Current Bill Rate)
+  // and parsed into the two lookup maps below. This keeps rate data out of the public code.
+  let HITACHI_RATE_BY_ID = {};
+  let HITACHI_RATE_BY_NAME = {};
+  let hitachiDbLoaded = false;
 
   const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -209,6 +225,42 @@
   }
   function round2(n){ return Math.round((n+Number.EPSILON)*100)/100; }
 
+  // Parse the HTE MS COS rate-database CSV into the two lookup maps.
+  // Expected columns (case-insensitive): "Freelancer User ID", "Freelancer Name", "Current Bill Rate".
+  // Returns the number of entries loaded, or throws on a structural problem.
+  function loadHitachiDb(rawText){
+    const rows = parseCSV(rawText);
+    if (!rows.length) throw new Error('Rate database file is empty.');
+    const header = rows[0];
+    const idId   = findIdx(header, ['Freelancer User ID','User ID','Username']);
+    const idName = findIdx(header, ['Freelancer Name','Name']);
+    const idRate = findIdx(header, ['Current Bill Rate','Bill Rate','Rate']);
+    if (idRate === -1 || (idId === -1 && idName === -1)){
+      throw new Error('Rate database needs a "Current Bill Rate" column and at least one of "Freelancer User ID" / "Freelancer Name".');
+    }
+    const byId = {}, byName = {};
+    let count = 0;
+    for (let r=1; r<rows.length; r++){
+      const row = rows[r];
+      if (row.every(c=>(c||'').trim()==='')) continue;
+      const get = i => (i>=0 && i<row.length ? (row[i]??'') : '');
+      // strip $, commas, spaces from the rate
+      const rateRaw = get(idRate).replace(/[$,\s]/g,'');
+      const rate = parseFloat(rateRaw);
+      if (!isFinite(rate)) continue;
+      const uid = get(idId).trim().toLowerCase();
+      const nm  = get(idName).trim().toLowerCase();
+      if (uid) byId[uid] = rate;
+      if (nm)  byName[nm] = rate;
+      count++;
+    }
+    if (count === 0) throw new Error('No valid rate rows found in the database file.');
+    HITACHI_RATE_BY_ID = byId;
+    HITACHI_RATE_BY_NAME = byName;
+    hitachiDbLoaded = true;
+    return count;
+  }
+
   // Convert a JS Date to an Excel serial number (1900 date system).
   // Deterministic across browser/node — avoids relying on instanceof Date.
   function excelSerial(d){
@@ -228,17 +280,27 @@
   }
 
   // Convert a raw export into a matrix of [ {cells...} ] rows ready for the sheet.
+  // mode: undefined/'standard' -> read Bill code & Bill rate from file.
+  //       'hitachi' -> Bill Code blank, Bill Rate from internal DB by username then name.
   // Returns { rows: [...], stats }
-  function convertExport(rawText){
+  function convertExport(rawText, mode){
     const rows = parseCSV(rawText);
     if (!rows.length) throw new Error('File is empty.');
     const header = rows[0];
+    const isHitachi = mode==='hitachi';
+
+    // Required columns differ by mode: Hitachi doesn't need Bill code / Bill rate from the file.
+    const reqMap = {};
+    for (const o in MAP){
+      if (isHitachi && (o==='Bill Code' || o==='Bill Rate')) continue;
+      reqMap[o] = MAP[o];
+    }
     const idx={}; const missing=[];
-    for (const o in MAP){ const i=findIdx(header,MAP[o]); idx[o]=i; if(i===-1) missing.push(MAP[o][0]); }
+    for (const o in reqMap){ const i=findIdx(header,reqMap[o]); idx[o]=i; if(i===-1) missing.push(reqMap[o][0]); }
     if (missing.length){
       throw new Error('Missing column(s): '+missing.join(', '));
     }
-    const out=[]; let payroll=0, ic=0;
+    const out=[]; let payroll=0, ic=0, unmatched=0; const unmatchedWho={};
     for (let r=1;r<rows.length;r++){
       const row=rows[r];
       if (row.every(c=>(c||'').trim()==='')) continue;
@@ -247,16 +309,37 @@
       const totalHours = get(idx['Total Hours']).trim();
       const manualHours = get(idx['Manual Hours']).trim();
       const totalCharges = get(idx['Total Charges']).trim();
-      const billCode = get(idx['Bill Code']).trim();
-      const billRate = get(idx['Bill Rate']).trim();
+      const username = get(idx['Username']);
+      const name = get(idx['Freelancer Name']);
+
+      let billCode, billRate;
+      if (isHitachi){
+        billCode = ''; // always empty for HTE MS COS
+        // look up rate by username first, then by name
+        let rate = HITACHI_RATE_BY_ID[username.trim().toLowerCase()];
+        if (rate===undefined) rate = HITACHI_RATE_BY_NAME[name.trim().toLowerCase()];
+        if (rate===undefined){
+          billRate = '';
+          unmatched++;
+          const who = (username.trim() || name.trim());
+          if (who) unmatchedWho[who] = (unmatchedWho[who]||0)+1;
+        } else {
+          billRate = rate;
+        }
+      } else {
+        billCode = get(idx['Bill Code']).trim();
+        const br = get(idx['Bill Rate']).trim();
+        billRate = br===''?'':Number(br);
+      }
+
       const agency = get(idx['Agency']).trim();
       const eng = agency ? 'Payroll' : 'Independent Contractor';
       if (agency) payroll++; else ic++;
       out.push({
         date: dateVal,
         team: get(idx['Team']),
-        name: get(idx['Freelancer Name']),
-        username: get(idx['Username']),
+        name: name,
+        username: username,
         agency: get(idx['Agency']),
         contract: get(idx['Contract']),
         type: get(idx['Type']),
@@ -264,10 +347,10 @@
         manualHours: manualHours===''?'':Number(manualHours),
         totalCharges: totalCharges===''?'':Number(totalCharges),
         billCode: billCode,
-        billRate: billRate===''?'':Number(billRate)
+        billRate: billRate
       });
     }
-    return { rows: out, stats: { payroll, ic, total: out.length } };
+    return { rows: out, stats: { payroll, ic, total: out.length, unmatched, unmatchedWho } };
   }
 
   // ---------- tab name / date helpers ----------
@@ -312,34 +395,56 @@
   MONTHS.forEach((m,i)=>{ const o=document.createElement('option'); o.value=m; o.textContent=m; if(i===3)o.selected=true; monthSel.appendChild(o); });
 
   // file store per program
-  const files = {}; // name -> { text, fileName }
+  const files = {}; // name -> { text, fileName, mode }
+  let hitachiProgramName = null; // set when a hitachi-mode program exists
+
+  // PROGRAMS entries may be a string (standard) or { name, mode }. Normalize.
+  function progInfo(p){ return (typeof p === 'string') ? { name: p, mode: 'standard' } : { name: p.name, mode: p.mode || 'standard' }; }
 
   function refreshGenState(){
     const any = Object.keys(files).length>0;
     const datesOk = startEl.value && endEl.value;
-    genBtn.disabled = !(any && datesOk);
+    // If an HTE MS COS export is loaded, its rate database must be loaded too.
+    const hteLoaded = hitachiProgramName && files[hitachiProgramName];
+    const needDb = hteLoaded && !hitachiDbLoaded;
+
+    genBtn.disabled = !(any && datesOk && !needDb);
     if (!any) genNote.textContent='Upload at least one program file to enable.';
     else if (!datesOk) genNote.textContent='Set start and end date to enable.';
+    else if (needDb) genNote.textContent='HTE MS COS needs its rate database uploaded before generating.';
     else genNote.textContent=Object.keys(files).length+' program file(s) ready.';
   }
 
-  PROGRAMS.forEach(name=>{
+  PROGRAMS.forEach(p=>{
+    const info = progInfo(p);
+    const name = info.name;
+    const isHitachi = info.mode==='hitachi';
+    if (isHitachi) hitachiProgramName = name;
+
     const row=document.createElement('div'); row.className='prow'; row.dataset.name=name;
+    const dbSlot = isHitachi
+      ? '<label class="upbtn dbbtn">Rate DB<input type="file" accept=".csv,text/csv" class="dbinput"></label>'
+      : '';
     row.innerHTML =
       '<span class="pname">'+name+'</span>'+
+      (isHitachi ? '<span class="ptag">rate DB required</span>' : '')+
       '<span class="pspacer"></span>'+
       '<span class="pstatus">No file</span>'+
-      '<label class="upbtn">Upload CSV<input type="file" accept=".csv,text/csv"></label>'+
+      dbSlot +
+      '<label class="upbtn">Upload CSV<input type="file" accept=".csv,text/csv" class="exinput"></label>'+
       '<button class="clearbtn" title="Remove" style="display:none">×</button>';
-    const input=row.querySelector('input');
+
+    const input=row.querySelector('.exinput');
     const status=row.querySelector('.pstatus');
     const clear=row.querySelector('.clearbtn');
+
+    // Export file upload
     input.addEventListener('change', e=>{
       const f=e.target.files[0]; input.value='';
       if(!f) return;
       const reader=new FileReader();
       reader.onload=ev=>{
-        files[name]={ text: ev.target.result, fileName: f.name };
+        files[name]={ text: ev.target.result, fileName: f.name, mode: info.mode };
         status.textContent=f.name; status.className='pstatus ok';
         row.classList.add('loaded'); clear.style.display='';
         refreshGenState();
@@ -351,6 +456,36 @@
       delete files[name]; status.textContent='No file'; status.className='pstatus';
       row.classList.remove('loaded'); clear.style.display='none'; refreshGenState();
     });
+
+    // Rate-database upload (hitachi only)
+    if (isHitachi){
+      const dbInput = row.querySelector('.dbinput');
+      const dbBtn = row.querySelector('.dbbtn');
+      const tag = row.querySelector('.ptag');
+      dbInput.addEventListener('change', e=>{
+        const f=e.target.files[0]; dbInput.value='';
+        if(!f) return;
+        const reader=new FileReader();
+        reader.onload=ev=>{
+          try {
+            const n = loadHitachiDb(ev.target.result);
+            dbBtn.classList.add('loaded-db');
+            dbBtn.firstChild.textContent = 'Rate DB ✓';
+            tag.textContent = n+' rates loaded';
+            tag.classList.add('ok');
+          } catch(err){
+            hitachiDbLoaded=false;
+            tag.textContent = 'DB error';
+            tag.classList.remove('ok');
+            alert('Rate database problem: '+err.message);
+          }
+          refreshGenState();
+        };
+        reader.onerror=()=>{ alert('Could not read the rate database file.'); };
+        reader.readAsText(f);
+      });
+    }
+
     programsEl.appendChild(row);
   });
 
@@ -380,6 +515,13 @@
   // ---------- workbook generation ----------
   genBtn.addEventListener('click', ()=>{
     logEl.innerHTML=''; logEl.classList.remove('show');
+
+    // Safety guard: HTE MS COS export requires its rate database.
+    if (hitachiProgramName && files[hitachiProgramName] && !hitachiDbLoaded){
+      log('Cannot generate: '+hitachiProgramName+' is loaded but its rate database has not been uploaded.', 'err');
+      return;
+    }
+
     const sp = startEl.value.split('-'), ep = endEl.value.split('-');
     const startD = new Date(+sp[0], +sp[1]-1, +sp[2]);
     const endD = new Date(+ep[0], +ep[1]-1, +ep[2]);
@@ -398,12 +540,14 @@
       let built=0;
       const usedNames = { 'Billing Months': true };
 
-      PROGRAMS.forEach(name=>{
+      PROGRAMS.forEach(p=>{
+        const info = progInfo(p);
+        const name = info.name;
         const fileObj = files[name];
         if (!fileObj) return; // only programs with a file
 
         let conv;
-        try { conv = convertExport(fileObj.text); }
+        try { conv = convertExport(fileObj.text, info.mode); }
         catch(err){ log(name+': '+err.message, 'err'); return; }
 
         if (!conv.rows.length){ log(name+': no data rows found, skipped.', 'warn'); return; }
@@ -461,7 +605,14 @@
 
         XLSX.utils.book_append_sheet(wb, ws, tn);
 
-        log(name+': '+conv.stats.total+' rows → "'+tn+'" ('+conv.stats.payroll+' Payroll, '+conv.stats.ic+' IC)', 'ok');
+        let msg = name+': '+conv.stats.total+' rows → "'+tn+'" ('+conv.stats.payroll+' Payroll, '+conv.stats.ic+' IC)';
+        if (info.mode==='hitachi' && conv.stats.unmatched>0){
+          const who = Object.keys(conv.stats.unmatchedWho).join(', ');
+          msg += ' · '+conv.stats.unmatched+' row(s) had no rate match in the database (Bill Rate left blank): '+who;
+          log(msg, 'warn');
+        } else {
+          log(msg, 'ok');
+        }
         built++;
       });
 
